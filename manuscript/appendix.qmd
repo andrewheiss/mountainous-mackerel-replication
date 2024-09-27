@@ -1,0 +1,622 @@
+---
+title: 'Online appendix for "Pandemic Pass? Treaty Derogations and Human Rights Practices During COVID-19"'
+short-title: 'Online appendix for "Pandemic Pass?"'
+subtitle: "(Research note)"
+author:
+- name: Suparna Chaudhry
+  affiliation: Lewis and Clark College
+  orcid: 0000-0003-3506-7590
+  url: https://www.suparnachaudhry.com/
+  email: schaudhry@lclark.edu
+- name: Audrey L. Comstock
+  affiliation: Arizona State University
+  orcid: 0000-0003-1772-5350
+  url: https://audreylcomstock.weebly.com/
+  email: audrey.comstock@asu.edu
+- name: Andrew Heiss
+  affiliation: Georgia State University
+  orcid: 0000-0002-3948-3914
+  url: https://www.andrewheiss.com
+  email: aheiss@gsu.edu
+date: July 25, 2024
+code-repo: "Access the code, data, and analysis at <https://github.com/andrewheiss/mountainous-mackerel>"
+bibliography: references.json
+csl: csl/chicago-author-date.csl
+link-citations: true
+crossref: 
+  tbl-title: "Table&nbsp;A"
+  fig-title: "Figure&nbsp;A"
+---
+
+```{r setup, include=FALSE}
+if (is.null(knitr::pandoc_to())) {
+  fmt_out <- "interactive"
+} else {
+  fmt_out <- knitr::pandoc_to()
+}
+
+knitr::opts_chunk$set(echo = FALSE, include = FALSE, 
+                      warning = FALSE, message = FALSE)
+
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "80%", collapse = TRUE)
+
+options(digits = 3, width = 120,
+        dplyr.summarise.inform = FALSE)
+```
+
+```{r libraries-data}
+library(tidyverse)
+library(patchwork)
+library(modelsummary)
+library(scales)
+library(tinytable)
+library(targets)
+
+tar_config_set(store = here::here('_targets'),
+               script = here::here('_targets.R'))
+
+# Generated via random.org
+set.seed(8511)
+
+who_regions_raw <- tar_read(iccpr_who_clean) %>% 
+  distinct(country_name, iso3, who_region, who_region_long)
+
+tar_load(year_quarter_lookup)
+tar_load(c(policies_table_data, hr_table_data))
+tar_load(c(models_tbl_policies, models_tbl_human_rights))
+
+# Plotting and modelsummary functions
+invisible(list2env(tar_read(graphic_functions), .GlobalEnv))
+invisible(list2env(tar_read(modelsummary_functions), .GlobalEnv))
+
+add_breaks <- function(x, fmt) {
+  sapply(x, \(text) {
+    if (is.na(text)) {
+      return(NA)
+    }
+
+    if (fmt == "latex") {
+      text <- str_replace_all(text, c("\\[" = "{[}", "\\]" = "{]}"))
+      if (str_detect(text, "\\n")) {
+        str_c("{", str_replace(text, "\\n", r"{ \\\\ }"), "}")
+      } else {
+        text
+      }
+    } else {
+      str_replace(text, "\\n", "<br>")
+    }
+  }) %>% unname()
+}
+```
+
+::: {.content-visible when-meta="list-of-figures-normal"}
+```{=latex}
+\listoftables
+\listoffigures
+```
+:::
+
+::: {.content-visible when-meta="list-of-figures-single"}
+
+```{=latex}
+\begin{singlespace}
+\listoftables
+\listoffigures
+\end{singlespace}
+```
+
+:::
+
+\clearpage
+
+# Modeling approach
+
+We use Stan `r cmdstanr::cmdstan_version()` [@stan] through R `r paste0(version$major, ".", version$minor)` [@rproject-4-3-3] and {brms} `r packageVersion("brms")` [@Burkner:2017] to estimate our models. We generate 4 MCMC chains for each model with 2,000 iterations in each chain, 1,000 of which are used for warmup. All chains converge; we assess convergence with visual inspection.
+
+Complete results from all the models, along with posterior predictive checks, goodness-of-fit measures, and prediction diagnostics are all available at a companion statistical analysis compendium at <https://doi.org/10.17605/OSF.IO/7GVDA>.
+
+## Priors
+
+We follow the suggestion of @GelmanJakulinPittau:2008 and use weakly informative priors for our logistic and ordered logistic regression models. For consistency with prior specification, and for computation efficiency, we mean-center all nonbinary variables so that parameter estimates represent changes from the mean. We use two general priors (see @fig-priors):
+
+- For all $\beta$ terms, we use a Student t distribution with a mean of 0 and a standard deviation of 3. This keeps most parameter estimates around −5 to 5, with thicker tails that allow for some possibility of extreme values.
+- For $\sigma$ terms related to the variance or standard deviation of parameter distributions, which must be positive, we use a half Cauchy distribution, centered at 0 with a $\gamma$ of 1
+
+These priors give more weight to realistic areas of parameter values and downweight values in unrealistic spaces. For instance, since logit-scale coefficient values greater than 4 or 5 are highly unlikely, our Student t prior puts more weight on smaller values. Additionally, weakly informative priors allow reasonable and considerable uncertainty in possible parameter estimates.
+
+```{r}
+#| label: fig-priors
+#| fig-cap: "Density plots of prior distributions for model parameters"
+#| fig-width: 6.5
+#| fig-height: 2.5
+#| out-width: "100%"
+#| include: true
+#| echo: false
+
+p1 <- ggplot() +
+  stat_function(geom = "area", 
+                fun = ~extraDistr::dlst(., df = 1, mu = 0, sigma = 3), 
+                fill = clrs[2]) +
+  xlim(c(-20, 20)) +
+  labs(x = "βs") +
+  facet_wrap(vars("β: Student t(ν = 1, µ = 0, σ = 3)")) +
+  theme_pandem(prior = TRUE)
+
+p2 <- ggplot() +
+  stat_function(geom = "area", 
+                fun = ~dcauchy(., 0, 1), 
+                fill = clrs[4]) +
+  xlim(c(0, 10)) +
+  labs(x = "σ") +
+  facet_wrap(vars("σ: Cauchy(x = 0, γ = 1), lower bound = 0")) +
+  theme_pandem(prior = TRUE)
+
+plot_priors <- p1 | p2
+plot_priors
+# ggsave("submissions/figs/plot_priors.svg", plot_priors, width = 6.5, height = 2.5)
+```
+
+
+## Model definitions
+
+### H~1~: Logistic regression
+
+```{r}
+#| label: fig-country-week-structure
+#| include: true
+#| echo: false
+#| fig-cap: "Hierarchy of country-week data, showing location and frequency of measured variables"
+#| fig-align: center
+#| out-width: 100%
+
+knitr::include_graphics("img/fig-country-week-structure-1.svg")
+```
+
+$$
+\begin{aligned}
+&\ \mathrlap{\textbf{Binary outcome $i$ across week $t$ within each country $j$}} \\
+\text{Outcome}_{it_j} \sim&\ \operatorname{Bernoulli}(\pi_{it_j}) \\[0.75em]
+&\ \textbf{Distribution parameters} \\
+\pi_{it_j} =&\ (\beta_0 + b_{0_j}) + \beta_1 \text{Derogation in effect}_{it} + \\
+&\ \beta_2\ \text{New cases}_{it}\ + \beta_3\ \text{Cumulative cases}_{it}\ + \\
+&\ \beta_4\ \text{New deaths}_{it}\ + \beta_5\ \text{Cumulative deaths}_{it}\ + \\
+&\ \beta_6\ \text{Past ICCPR derogation}_{it}\ + \beta_7\ \text{Past ICCPR action}_{it}\ + \\
+&\ \beta_8\ \text{Rule of law index}_{it}\ + \beta_9\ \text{Civil liberties index}_{it}\ + \\
+&\ \beta_{10}\ \text{Core civil society index}_{it}\ + \beta_{11}\ \text{Week number}_{it} \\
+b_{0_j} \sim&\ \mathcal{N}(0, \sigma_0) \\[0.75em]
+&\ \textbf{Priors} \\
+\beta_{0 \dots 11} \sim&\ \operatorname{Student\ t}(\nu = 1, \mu = 0, \sigma = 3) \\
+\sigma_0 \sim&\ \operatorname{Cauchy}(x = 0, \gamma = 1) \text{, lower bound} = 0
+\end{aligned}
+$$
+
+The actual R code for these models is included in the replication code at <https://doi.org/10.17605/OSF.IO/ANONYMIZED-FOR-NOW> This is a simplified representation of the {brms} [@Burkner:2017] model code:
+
+```r
+# H1: Logistic regression for binary outcomes
+brm(
+  bf(outcome ~ derogation_ineffect + 
+      new_cases_z + cumulative_cases_z + 
+      new_deaths_z + cumulative_deaths_z +
+      prior_iccpr_derogations + prior_iccpr_other_action + 
+      v2x_rule + v2x_civlib + v2xcs_ccsi + 
+      year_week_num + (1 | country_name)),
+  family = bernoulli(),
+  prior = c(
+    prior(student_t(1, 0, 3), class = Intercept),
+    prior(student_t(1, 0, 3), class = b),
+    prior(cauchy(0, 1), class = sd, lb = 0)),
+  ...
+)
+```
+
+### H~2~: Ordered logistic regression
+
+```{r}
+#| label: fig-region-quarter-structure
+#| include: true
+#| echo: false
+#| fig-cap: "Hierarchy of region-quarter data, showing location and frequency of measured variables"
+#| fig-align: center
+#| out-width: 100%
+
+knitr::include_graphics("img/fig-region-quarter-structure-1.svg")
+```
+
+$$
+\begin{aligned}
+&\ \mathrlap{\textbf{Model of outcome level $i$ across quarter $t$ within each region $j$}} \\
+\text{Outcome}_{it_j} \sim&\ \operatorname{Ordered\ logit}(\phi_{it_j}, \alpha_k) \\[0.75em]
+&\ \textbf{Models for distribution parameters} \\
+\phi_{it_j} =&\ (\beta_0 + b_{0_j}) + \beta_1 \text{Derogation in effect}_{it} + \\
+&\ \beta_2\ \text{New cases}_{it}\ + \beta_3\ \text{Cumulative cases}_{it}\ + \\
+&\ \beta_4\ \text{New deaths}_{it}\ + \beta_5\ \text{Cumulative deaths}_{it}\ + \\
+&\ \beta_6\ \text{Past ICCPR derogation}_{it}\ + \beta_7\ \text{Past ICCPR action}_{it}\ + \\
+&\ \beta_8\ \text{Rule of law index}_{it}\ + \beta_9\ \text{Civil liberties index}_{it}\ + \\
+&\ \beta_{10}\ \text{Core civil society index}_{it}\ + \beta_{11}\ \text{Quarter number}_{it} \\
+b_{0_j} \sim&\ \mathcal{N}(0, \sigma_0) \\[0.75em]
+&\ \textbf{Priors} \\
+\beta_{0 \dots 11} \sim&\ \operatorname{Student\ t}(\nu = 1, \mu = 0, \sigma = 3) \\
+\sigma_0 \sim&\ \operatorname{Cauchy}(x = 0, \gamma = 1) \text{, lower bound} = 0 \\
+\alpha_k \sim&\ \mathcal{N}(0, 1)
+\end{aligned}
+$$
+
+The actual R code for these models is included in the replication code at <https://doi.org/10.17605/OSF.IO/ANONYMIZED-FOR-NOW> This is a simplified representation of the {brms} [@Burkner:2017] model code:
+
+```r
+# H2: Ordinal logistic regression for ordered outcomes
+brm(
+  bf(outcome ~ derogation_ineffect + 
+      new_cases_z + cumulative_cases_z + 
+      new_deaths_z + cumulative_deaths_z +
+      prior_iccpr_derogations + prior_iccpr_other_action + 
+      v2x_rule + v2x_civlib + v2xcs_ccsi + 
+      year_quarter_num + (1 | who_region)),
+  family = cumulative(),
+  prior = c(
+    prior(student_t(1, 0, 3), class = Intercept),
+    prior(student_t(1, 0, 3), class = b),
+    prior(cauchy(0, 1), class = sd, lb = 0)),
+  ...
+)
+```
+
+::: {.content-visible when-format="html"}
+# H~1~: Derogations and emergency policies
+
+## Predicted probabilities and group contrasts
+:::
+
+\blandscape
+
+```{r tbl-policies-summary}
+#| tbl-cap: Summary of predicted probabilities and minimum and maximum contrasts between derogating and non-derogating countries for emergency policy models
+#| include: true
+#| echo: false
+
+tbl_part1 <- policies_table_data$policies_pred_tbl %>% 
+  mutate(across(c(draw, min, max), list(nice = ~label_number(accuracy = 0.01)(.)))) %>% 
+  mutate(time = ifelse(year_week_day == "2020-03-09", "March 2020", "June 2021")) %>% 
+  mutate(num = glue::glue("{draw_nice}\n[{min_nice}–{max_nice}]")) %>% 
+  select(nice, time, derogation_ineffect, num) %>% 
+  pivot_wider(names_from = "time", values_from = "num")
+
+tbl_part2 <- policies_table_data$policies_mfx_tbl %>% 
+  mutate(across(c(draw, min, max, p_gt_0), list(nice = ~label_number(accuracy = 0.01)(.)))) %>% 
+  mutate(diff_type = ifelse(rank == "min", "Smallest difference", "Largest difference")) %>% 
+  mutate(num = glue::glue("{draw_nice}\n[{min_nice}–{max_nice}]")) %>% 
+  select(nice, year_week_day, diff_type, num, p_gt_0) %>% 
+  pivot_wider(names_from = "diff_type", values_from = c("num", "p_gt_0", "year_week_day")) %>% 
+  mutate(derogation_ineffect = "No")
+
+tbl_groups <- tbl_part1 %>%
+  select(nice) %>% 
+  mutate(row = 1:n()) %>%
+  distinct(nice, .keep_all = TRUE) %>% 
+  mutate(row_cumulative = row + row_number() - 1)
+
+tbl_part1 %>%
+  left_join(tbl_part2, by = join_by(nice, derogation_ineffect)) %>%
+  mutate(across(where(is.character), ~add_breaks(., fmt = fmt_out))) %>% 
+  select(
+    derogation_ineffect, `March 2020`, `June 2021`,
+    `year_week_day_Smallest difference`, `num_Smallest difference`, `p_gt_0_Smallest difference`,
+    `year_week_day_Largest difference`, `num_Largest difference`, `p_gt_0_Largest difference`
+  ) %>%
+  set_names(
+    c(
+      "Derogation", "March 2020", "June 2021",
+      "Week", "$\\Delta$", "p > 0", "Week", "$\\Delta$", "p > 0"
+    )
+  ) %>%
+  tt(width = c(0.7, 1, 1, 1, 0.8, 0.5, 1, 0.8, 0.5) |> {\(x) x / sum(x)}()) %>%
+  format_tt() %>%
+  style_tt(j = 1:9, align = "lcccccccc") %>%
+  style_tt(i = 1:20, j = 3, line = "r", line_width = 0.1, line_color = "#000000") %>%
+  group_tt(
+    i = pull(tbl_groups, row, name = nice) %>% as.list(),
+    j = list(
+      "Predicted probabilities" = 2:3, 
+      "Smallest difference" = 4:6, 
+      "Largest difference" = 7:9),
+    indent = 0) %>% 
+  style_tt(
+    i = tbl_groups$row_cumulative, 
+    bold = TRUE, background = "#e6e6e6", align = "l"
+  ) %>% 
+  style_tt(
+    bootstrap_class = "table table-sm",
+    tabularray_inner = "rowsep=1pt, cells={font=\\scriptsize}, row{2}={valign=b}"
+  )
+```
+
+\elandscape
+
+::: {.content-visible when-format="html"}
+## Complete model results
+:::
+
+```{r tbl-results-full-policies}
+#| tbl-cap: "Complete results from models showing relationship between derogations and emergency policies (H~1~)"
+#| include: true
+#| echo: false
+
+notes <- paste(
+  "Note: Estimates are median posterior log odds from ordered logistic and binary logistic regression models;",
+  "95% credible intervals (highest density posterior interval, or HDPI) in brackets.",
+  "Total \\(R^2\\) considers the variance of both population and group effects;",
+  "marginal \\(R^2\\) only takes population effects into account."
+)
+
+if (fmt_out == "latex") {
+  notes <- str_replace_all(notes, "%", r"(\\%)")
+}
+
+inner <- "
+row{odd[3-27]}={abovesep=0pt, belowsep=6pt},
+row{even[2-26]}={rowsep=0pt},
+cells={font=\\scriptsize}, row{1}={valign=b}
+"
+
+css <- "
+.coef-table-1 tbody tr:not(:nth-child(n+26)):nth-child(odd) td {
+    padding-bottom: 0;
+}
+.coef-table-1 tbody tr:not(:nth-child(n+27)):nth-child(even) td {
+    padding-top: 0;
+}
+"
+
+modelsummary(models_tbl_policies,
+  estimate = "{estimate}",
+  statistic = "[{conf.low}, {conf.high}]",
+  coef_map = coef_map,
+  gof_map = gof_map,
+  output = "tinytable",
+  fmt = fmt_significant(2),
+  notes = notes,
+  width = c(0.2, rep(0.16, 5)),  
+) %>% 
+  style_tt(i = seq(1, 25, 2), j = 1, rowspan = 2, alignv = "t") %>% 
+  style_tt(
+    bootstrap_class = "table table-sm coef-table-1",
+    bootstrap_css_rule = css,
+    tabularray_inner = inner
+  )
+```
+
+::: {.content-visible when-format="html"}
+# H~2~: Derogations and human rights
+
+## Predicted probabilities and group contrasts
+:::
+
+\blandscape
+
+```{r table-hr-summary}
+#| include: true
+#| echo: false
+
+tbl_part1 <- hr_table_data$hr_pred_tbl %>% 
+  mutate(across(c(draw, min, max), list(nice = ~label_number(accuracy = 0.01)(.)))) %>% 
+  mutate(time = ifelse(year_quarter_day == "2020-01-01", "2020-Q1", "2021-Q2")) %>% 
+  mutate(num = glue::glue("{draw_nice}\n[{min_nice}–{max_nice}]")) %>% 
+  select(nice, time, group = category, derogation_ineffect, num) %>% 
+  pivot_wider(names_from = "time", values_from = "num") %>% 
+  mutate(group = recode(group, "NA" = "—"))
+
+tbl_part2 <- hr_table_data$hr_mfx_tbl %>% 
+  left_join(year_quarter_lookup, by = join_by(year_quarter_day)) %>% 
+  mutate(across(c(draw, min, max, p_gt_0), list(nice = ~label_number(accuracy = 0.01)(.)))) %>% 
+  mutate(group = recode(group, "Logit" = "—")) %>% 
+  mutate(diff_type = ifelse(rank == "min", "Smallest difference", "Largest difference")) %>% 
+  mutate(num = glue::glue("{draw_nice}\n[{min_nice}–{max_nice}]")) %>% 
+  select(nice, year_quarter, group, diff_type, num, p_gt_0) %>% 
+  pivot_wider(names_from = "diff_type", values_from = c("num", "p_gt_0", "year_quarter")) %>% 
+  mutate(derogation_ineffect = "No")
+
+tbl_groups <- tbl_part1 %>%
+  select(nice) %>% 
+  mutate(row = 1:n()) %>%
+  distinct(nice, .keep_all = TRUE) %>% 
+  mutate(row_cumulative = row + row_number() - 1)
+
+tbl_part1 %>%
+  left_join(tbl_part2, by = join_by(nice, derogation_ineffect, group)) %>%
+  mutate(across(where(is.character), ~add_breaks(., fmt = fmt_out))) %>% 
+  select(
+    derogation_ineffect, group, `2020-Q1`, `2021-Q2`,
+    `year_quarter_Smallest difference`, `num_Smallest difference`, `p_gt_0_Smallest difference`,
+    `year_quarter_Largest difference`, `num_Largest difference`, `p_gt_0_Largest difference`
+  ) %>%
+  set_names(
+    c(
+      "Derogation", "Level", "2020-Q2", "2021-Q2",
+      "Week", "$\\Delta$", "p > 0", "Week", "$\\Delta$", "p > 0"
+    )
+  ) %>% 
+  tt(
+    width = c(0.7, 0.7, 1, 1, 1, 0.8, 0.5, 1, 0.8, 0.5) |> {\(x) x / sum(x)}(),
+    caption = "Summary of predicted probabilities and minimum and maximum contrasts between derogating and non-derogating countries for human rights models \\label{tbl-hr-summary}") %>%
+  format_tt() %>%
+  style_tt(j = 1:10, align = "lccccccccc") %>%
+  style_tt(i = 1:30, j = 4, line = "r", line_width = 0.1, line_color = "#000000") %>%
+  group_tt(
+    i = pull(tbl_groups, row, name = nice) %>% as.list(),
+    j = list(
+      "Predicted probabilities" = 3:4, 
+      "Smallest difference" = 5:7, 
+      "Largest difference" = 8:10),
+    indent = 0) %>% 
+  style_tt(
+    i = tbl_groups$row_cumulative, 
+    bold = TRUE, background = "#e6e6e6", align = "l"
+  ) %>% 
+  style_tt(
+    bootstrap_class = "table table-sm",
+    tabularray_outer = "theme=long",
+    tabularray_inner = "rowsep=1pt, cells={font=\\scriptsize}, row{2}={valign=b}"
+  ) %>% 
+  theme_tt("multipage", rowhead = 2)
+```
+
+\elandscape
+
+::: {.content-visible when-format="html"}
+## Complete model results
+:::
+
+```{r tbl-results-full-human-rights}
+#| tbl-cap: Complete results from models showing relationship between derogations and human rights (H~2~)
+#| include: true
+#| echo: false
+
+inner <- "
+row{odd[3-33]}={abovesep=0pt, belowsep=2pt},
+row{even[2-34]}={abovesep=0pt, belowsep=0pt},
+cells={font=\\scriptsize}, row{1}={valign=b}
+"
+
+css <- "
+.coef-table-2 tbody tr:not(:nth-child(n+32)):nth-child(odd) td {
+    padding-bottom: 0;
+}
+.coef-table-2 tbody tr:not(:nth-child(n+33)):nth-child(even) td {
+    padding-top: 0;
+}
+"
+
+modelsummary(models_tbl_human_rights,
+  estimate = "{estimate}",
+  statistic = "[{conf.low}, {conf.high}]",
+  coef_map = coef_map,
+  gof_map = gof_map,
+  output = "tinytable",
+  fmt = fmt_significant(2),
+  notes = notes,
+  width = rep(0.2, 5),  
+) %>% 
+  style_tt(i = seq(1, 25, 2), j = 1, rowspan = 2, alignv = "t") %>% 
+  style_tt(
+    bootstrap_class = "table table-sm coef-table-2",
+    bootstrap_css_rule = css,
+    tabularray_inner = inner
+  )
+```
+
+\clearpage
+
+```{r tbl-who-regions}
+#| tbl-cap: WHO regions
+#| include: true
+#| echo: false
+who_regions <- who_regions_raw %>%
+  mutate(
+    region_title = glue::glue("{who_region}: {who_region_long}")
+  ) %>% 
+  group_by(region_title) %>% 
+  summarize(
+    countries = str_flatten(country_name, collapse = ", ", last = ", and ")
+  ) %>% 
+  pivot_longer(cols = everything()) %>% 
+  select(-name) %>% 
+  as.data.frame() %>%  # tibbles don't like NULL column names
+  set_names(NULL)
+
+who_regions %>% 
+  tt(width = 1) %>% 
+  format_tt(j = 1, escape = TRUE) %>% 
+  style_tt(i = seq(1, nrow(who_regions), by = 2), bold = TRUE, background = "#e6e6e6") %>% 
+  style_tt(i = seq(2, nrow(who_regions), by = 2), indent = 0, align = "l") %>% 
+  style_tt(
+    bootstrap_class = "table table-sm",
+    tabularray_inner = "rowsep=1pt, cells={font=\\footnotesize}"
+  )
+```
+
+\clearpage
+
+```{r tbl-achr-echr-iccpr}
+#| tbl-cap: States that derogated from regional human rights conventions
+#| include: true
+#| echo: false
+
+achr_echr_iccpr <- tribble(
+                 ~ACHR, ~Also,             ~ECHR, ~Also1,
+           "Argentina", "Yes",         "Albania",   "No",
+             "Bolivia",  "No",         "Armenia",  "Yes",
+               "Chile", "Yes",      "Azerbaijan",  "Yes",
+            "Colombia", "Yes",         "Estonia",  "Yes",
+  "Dominican Republic", "Yes",         "Georgia",  "Yes",
+             "Ecuador", "Yes",          "Latvia",  "Yes",
+         "El Salvador", "Yes",         "Moldova",  "Yes",
+           "Guatemala", "Yes", "North Macedonia",   "No",
+            "Honduras",  "No",         "Romania",  "Yes",
+             "Jamaica",  "No",      "San Marino",  "Yes",
+              "Panama",  "No",          "Serbia",   "No",
+            "Paraguay", "Yes",                NA,     NA,
+                "Peru", "Yes",                NA,     NA,
+            "Suriname",  "No",                NA,     NA,
+           "Venezuela",  "No",                NA,     NA
+  )
+
+achr_echr_iccpr %>% 
+  as.data.frame() %>% 
+  set_names(
+    c(
+      "States that derogated from the ACHR",
+      "Also submitted ICCPR derogation",
+      "States that derogated from the ECHR",
+      "Also submitted ICCPR derogation"
+    )
+  ) %>% 
+  tt(
+    width = c(0.3, 0.2, 0.3, 0.2),
+    notes = "ACHR = American Convention on Human Rights; ECHR = European Convention on Human Rights"
+  ) %>% 
+  format_tt(replace = list(" " = NA)) %>% 
+  style_tt(j = 1:4, align = "lclc") %>% 
+  style_tt(
+    bootstrap_class = "table table-sm",
+    tabularray_inner = "cells={font=\\scriptsize}, row{1}={valign=b}"
+  )
+```
+
+\clearpage
+
+```{r tbl-results-determinants}
+#| tbl-cap: Results from @ChaudhryComstockHeiss:2024 showing the determinants of derogation
+#| include: true
+#| echo: false
+
+det_models <- readRDS(here::here("data", "raw_data", "determinants_models.rds"))
+
+modelsummary(
+  det_models$models, 
+  exponentiate = TRUE,
+  estimate = "{estimate} ({std.error}){stars}",
+  statistic = NULL,
+  coef_map = det_models$coef_map,
+  gof_map = det_models$gof_map,
+  output = "tinytable",
+  fmt = fmt_significant(2),
+  stars = c("*" = 0.1, "**" = 0.05, "***" = 0.01),
+  notes = list(
+    "Dependent variable = derogation submission",
+    "Logistic regression models; odds ratios (standard error)",
+    "* p < 0.1, ** p < 0.05, *** p < 0.01"
+  ),
+  width = c(0.5, 0.25, 0.25)
+) %>% 
+  style_tt(
+    bootstrap_class = "table table-sm",
+    tabularray_inner = "cells={font=\\scriptsize}"
+  )
+```
+
+\clearpage
+
+# References
