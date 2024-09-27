@@ -149,9 +149,9 @@ list(
   tar_target(human_rights_plot_data, build_human_rights_plot_data(m_human_rights, year_quarter_lookup)),
   tar_target(hr_table_data, build_hr_table_data(human_rights_plot_data)),
 
-  ## Manuscript and analysis notebook ----
-  tar_quarto(manuscript, path = "manuscript", working_directory = "manuscript", quiet = FALSE)#,
+  ## Manuscript ----
+  tar_quarto(manuscript, path = "manuscript", working_directory = "manuscript", quiet = FALSE),
 
   ## Render the README ----
-  # tar_quarto(readme, here_rel("README.qmd"))
+  tar_quarto(readme, here_rel("README.qmd"))
 )
